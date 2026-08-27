@@ -72,6 +72,33 @@ export OPENAI_API_KEY=sk-...
 cd backend && pytest && ruff check . && mypy app
 ```
 
+## Paying for runs
+
+Three tiers, in the order the code checks them:
+
+1. **Your own key.** Paste an OpenAI, Anthropic or Gemini key in the UI. It is
+   kept in `localStorage`, sent as a header per request, never written down
+   server-side, and the free cap does not apply — the run is billed to you.
+2. **Free runs.** Five per browser session, with a per-IP daily backstop.
+3. **Paid credits.** RM10 for 20 runs through toyyibPay (FPX and selected
+   e-wallets; an individual can register without an SSM company).
+
+Checkout **refuses to open** unless `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`
+are set, because the fallback credit store is in-process and a redeploy would
+erase balances someone paid for. Create the table first:
+
+```sql
+create table credits (
+  session text primary key,
+  balance int not null default 0,
+  updated_at timestamptz not null default now()
+);
+```
+
+The payment callback never trusts the POST it receives — toyyibPay's callback is
+forgeable, so the server calls `getBillTransactions` back and grants credits only
+on what toyyibPay itself confirms, once per bill code.
+
 ## Monetisation hooks
 
 `frontend/src/components/AdSlot.tsx` renders responsive ad units and no-ops

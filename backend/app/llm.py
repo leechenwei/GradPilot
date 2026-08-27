@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
+from typing import Any, NamedTuple
 
 import httpx
 
 TIMEOUT = 60.0
+PROVIDERS = ("openai", "anthropic", "gemini")
+
+
+class Creds(NamedTuple):
+    """A key the user supplied for this request. Never logged, never stored."""
+
+    provider: str
+    key: str
 
 
 class LLMError(RuntimeError):
@@ -38,14 +46,14 @@ def _model(name: str) -> str:
     return os.getenv("GRADPILOT_LLM_MODEL") or _DEFAULT_MODELS.get(name, "")
 
 
-def complete(agent: str, system: str, user: str) -> dict[str, Any]:
+def complete(agent: str, system: str, user: str, creds: Creds | None = None) -> dict[str, Any]:
     """Return the agent's JSON object. `agent` only selects the mock reply."""
-    name = provider()
+    name = creds.provider if creds else provider()
     if name == "mock":
         from app.mock import mock_reply
 
         return mock_reply(agent, user)
-    raw = _call(name, system, user)
+    raw = _call(name, system, user, creds)
     return _parse(raw)
 
 
@@ -62,11 +70,11 @@ def _parse(raw: str) -> dict[str, Any]:
     return value
 
 
-def _call(name: str, system: str, user: str) -> str:
+def _call(name: str, system: str, user: str, creds: Creds | None) -> str:
     if name == "openai":
         return _post(
             "https://api.openai.com/v1/chat/completions",
-            {"Authorization": f"Bearer {_key('OPENAI_API_KEY')}"},
+            {"Authorization": f"Bearer {_key(creds, 'OPENAI_API_KEY')}"},
             {
                 "model": _model(name),
                 "response_format": {"type": "json_object"},
@@ -77,7 +85,7 @@ def _call(name: str, system: str, user: str) -> str:
     if name == "anthropic":
         return _post(
             "https://api.anthropic.com/v1/messages",
-            {"x-api-key": _key("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01"},
+            {"x-api-key": _key(creds, "ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01"},
             {
                 "model": _model(name),
                 "max_tokens": 2048,
@@ -86,7 +94,7 @@ def _call(name: str, system: str, user: str) -> str:
             },
         )["content"][0]["text"]
     if name == "gemini":
-        key = _key("GEMINI_API_KEY")
+        key = _key(creds, "GEMINI_API_KEY")
         return _post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{_model(name)}"
             f":generateContent?key={key}",
@@ -100,7 +108,10 @@ def _call(name: str, system: str, user: str) -> str:
     raise LLMError(f"unknown provider: {name}")
 
 
-def _key(env: str) -> str:
+def _key(creds: Creds | None, env: str) -> str:
+    """A user-supplied key wins over the server's, so BYO-key costs the server nothing."""
+    if creds:
+        return creds.key
     value = os.getenv(env)
     if not value:
         raise LLMError(f"{env} is not set")

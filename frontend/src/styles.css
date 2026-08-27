@@ -207,3 +207,11 @@ footer { margin-top: var(--step-12); color: var(--muted); font-size: 0.85rem; }
   cursor: grab;
 }
 .bookmarklet:active { cursor: grabbing; }
+
+.keybox { margin-top: var(--step-4); }
+.keybox select, .keybox input[type="password"] {
+  min-height: 2.25rem; padding: 0 var(--step-3); border: 1px solid var(--line);
+  border-radius: var(--radius); background: var(--bg); color: var(--text);
+  font: inherit; font-size: 0.9rem;
+}
+.keybox input[type="password"] { flex: 1 1 14rem; }

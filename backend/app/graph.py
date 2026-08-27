@@ -9,7 +9,7 @@ import json
 from collections.abc import Iterator
 from typing import Any
 
-from app.llm import complete
+from app.llm import Creds, complete
 
 APPROVAL_THRESHOLD = 0.8
 MAX_REVISIONS = 2
@@ -30,10 +30,10 @@ SYSTEM = {
 }
 
 
-def run(posting: str, cv: str) -> Iterator[dict[str, Any]]:
+def run(posting: str, cv: str, creds: Creds | None = None) -> Iterator[dict[str, Any]]:
     """Yield one event per node transition, then a final 'done' event."""
     scout: dict[str, Any] = {}
-    yield from _step(scout, "scout", SYSTEM["scout"], f"JOB POSTING:\n{posting}")
+    yield from _step(scout, "scout", SYSTEM["scout"], f"JOB POSTING:\n{posting}", creds=creds)
 
     matcher: dict[str, Any] = {}
     yield from _step(
@@ -41,6 +41,7 @@ def run(posting: str, cv: str) -> Iterator[dict[str, Any]]:
         "matcher",
         SYSTEM["matcher"],
         f"REQUIREMENTS:\n{_dump(scout)}\n\nCV:\n{cv}",
+        creds=creds,
     )
 
     draft: dict[str, Any] = {}
@@ -53,6 +54,7 @@ def run(posting: str, cv: str) -> Iterator[dict[str, Any]]:
             SYSTEM["writer"],
             f"ROLE:\n{_dump(scout)}\n\nMATCH:\n{_dump(matcher)}\n\nCV:\n{cv}" + feedback,
             revision=attempt,
+            creds=creds,
         )
         yield from _step(
             critique,
@@ -60,6 +62,7 @@ def run(posting: str, cv: str) -> Iterator[dict[str, Any]]:
             SYSTEM["critic"],
             f"REQUIREMENTS:\n{_dump(scout)}\n\nDRAFT:\n{_dump(draft)}",
             revision=attempt,
+            creds=creds,
         )
         if float(critique.get("score", 0)) >= APPROVAL_THRESHOLD:
             break
@@ -73,6 +76,7 @@ def run(posting: str, cv: str) -> Iterator[dict[str, Any]]:
         "interviewer",
         SYSTEM["interviewer"],
         f"ROLE:\n{_dump(scout)}\n\nGAPS:\n{_dump(matcher.get('gaps', []))}\n\nCV:\n{cv}",
+        creds=creds,
     )
 
     yield {
@@ -89,7 +93,8 @@ def run(posting: str, cv: str) -> Iterator[dict[str, Any]]:
 
 
 def _step(
-    out: dict[str, Any], agent: str, system: str, user: str, revision: int = 0
+    out: dict[str, Any], agent: str, system: str, user: str, revision: int = 0,
+    creds: Creds | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield 'start' before the call so the UI can show the node lighting up.
 
@@ -97,7 +102,7 @@ def _step(
     """
     yield {"type": "start", "agent": agent, "revision": revision}
     out.clear()
-    out.update(complete(agent, system, user))
+    out.update(complete(agent, system, user, creds))
     yield {"type": "result", "agent": agent, "revision": revision, "data": dict(out)}
 
 

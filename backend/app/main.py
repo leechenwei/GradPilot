@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from collections.abc import Iterator
 from typing import Annotated
 
-from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app import ingest, quota
+from app import credits, ingest, payments, quota
 from app.graph import run
-from app.llm import LLMError, provider
+from app.llm import PROVIDERS, Creds, LLMError, provider
 
 log = logging.getLogger("gradpilot")
 
@@ -43,8 +44,72 @@ def health() -> dict[str, str]:
 
 
 @app.get("/api/quota")
-def get_quota(x_session_id: str = Header(default="anonymous")) -> dict[str, int]:
-    return {"remaining": quota.remaining(x_session_id), "free_runs": quota.FREE_RUNS}
+def get_quota(x_session_id: str = Header(default="anonymous")) -> dict[str, object]:
+    return {
+        "remaining": quota.remaining(x_session_id),
+        "free_runs": quota.FREE_RUNS,
+        "credits": credits.store.balance(x_session_id),
+        "package": {"runs": payments.PACKAGE_RUNS, "price": "RM10"},
+        "can_buy": payments.configured() and credits.is_durable(),
+    }
+
+
+def _creds(header_provider: str, header_key: str) -> Creds | None:
+    """A key the user pasted. Validated, used for this request, never stored or logged."""
+    key = header_key.strip()
+    if not key:
+        return None
+    name = (header_provider or "openai").strip().lower()
+    if name not in PROVIDERS:
+        raise HTTPException(
+            status_code=400, detail=f"Provider must be one of {', '.join(PROVIDERS)}."
+        )
+    if not 20 <= len(key) <= 200:
+        raise HTTPException(status_code=400, detail="That does not look like an API key.")
+    return Creds(provider=name, key=key)
+
+
+@app.post("/api/checkout")
+def checkout(request: Request, x_session_id: str = Header(default="anonymous")) -> dict[str, str]:
+    """Create a toyyibPay bill for one run package and hand back its payment page."""
+    if not credits.is_durable():
+        # Selling credits that a redeploy erases is worse than not selling any.
+        raise HTTPException(status_code=503, detail="Payments are off: no credit store configured.")
+    api = os.getenv("PUBLIC_API_URL") or str(request.base_url).rstrip("/")
+    app_url = os.getenv("PUBLIC_APP_URL") or api
+    try:
+        url = payments.create_bill(
+            session=x_session_id,
+            return_url=f"{app_url}/#paid",
+            callback_url=f"{api}/api/payment/callback",
+        )
+    except payments.PaymentError as exc:
+        log.error("checkout failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Could not start the payment.") from exc
+    return {"url": url}
+
+
+@app.post("/api/payment/callback")
+def payment_callback(
+    billcode: str = Form(default=""), refno: str = Form(default="")
+) -> dict[str, str]:
+    """toyyibPay pings this. The POST is forgeable, so ask toyyibPay itself before granting."""
+    code = (billcode or refno).strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="missing billcode")
+    try:
+        paid, session = payments.verify(code)
+    except payments.PaymentError as exc:
+        log.error("verify failed for %s: %s", code, exc)
+        raise HTTPException(status_code=502, detail="could not verify") from exc
+    if not paid or not session:
+        return {"status": "ignored"}
+    marker = f"bill:{code}"
+    if credits.store.balance(marker):
+        return {"status": "already granted"}  # toyyibPay retries; grant once
+    credits.store.add(marker, 1)
+    credits.store.add(session, payments.PACKAGE_RUNS)
+    return {"status": "granted"}
 
 
 class ImportRequest(BaseModel):
@@ -74,25 +139,36 @@ def import_posting(body: ImportRequest) -> dict[str, str | int]:
 
 @app.post("/api/run")
 def start_run(
-    body: RunRequest, request: Request, x_session_id: str = Header(default="anonymous")
+    body: RunRequest,
+    request: Request,
+    x_session_id: str = Header(default="anonymous"),
+    x_llm_provider: str = Header(default=""),
+    x_llm_key: str = Header(default=""),
 ) -> StreamingResponse:
     # ponytail: the socket peer, not X-Forwarded-For — that header is client-set.
     # Behind a proxy, read it from the platform's trusted variant instead.
     ip = request.client.host if request.client else "unknown"
-    try:
-        left = quota.consume(x_session_id, ip)
-    except quota.QuotaExceeded as exc:
-        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    creds = _creds(x_llm_provider, x_llm_key)
+    if creds:
+        left = -1  # their key, their bill: the free cap does not apply
+    else:
+        try:
+            left = quota.consume(x_session_id, ip)
+        except quota.QuotaExceeded as exc:
+            try:
+                left = credits.store.spend(x_session_id)
+            except credits.CreditError:
+                raise HTTPException(status_code=429, detail=str(exc)) from exc
     return StreamingResponse(
-        _stream(body, left),
+        _stream(body, left, creds),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
-def _stream(body: RunRequest, left: int) -> Iterator[str]:
+def _stream(body: RunRequest, left: int, creds: Creds | None = None) -> Iterator[str]:
     try:
-        for event in run(body.posting, body.cv):
+        for event in run(body.posting, body.cv, creds):
             if event["type"] == "done":
                 event["result"]["runs_left"] = left
             yield _sse(event)
@@ -100,8 +176,14 @@ def _stream(body: RunRequest, left: int) -> Iterator[str]:
         # The client already has a 200 and half a stream, so the error must ride the stream.
         # Upstream text can carry keys, URLs and quota details: log it, do not echo it.
         ref = uuid.uuid4().hex[:8]
-        log.error("llm call failed ref=%s: %s", ref, exc)
-        yield _sse({"type": "error", "message": f"The model provider failed. Reference {ref}."})
+        log.error("llm call failed ref=%s byok=%s: %s", ref, bool(creds), exc)
+        detail = (
+            f"Your {creds.provider} key was rejected, or that account has no credit. "
+            "Check the key, or clear it to use the free runs."
+            if creds
+            else f"The model provider failed. Reference {ref}."
+        )
+        yield _sse({"type": "error", "message": detail})
 
 
 def _sse(event: dict[str, object]) -> str:

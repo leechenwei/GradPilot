@@ -18,18 +18,57 @@ export function sessionId(): string {
   return id;
 }
 
-export async function quotaLeft(): Promise<number> {
+export type Wallet = {
+  remaining: number;
+  free_runs: number;
+  credits: number;
+  package: { runs: number; price: string };
+  can_buy: boolean;
+};
+
+/** The key lives in this browser only. It is sent per request and never persisted server-side. */
+export function readKey(): { provider: string; key: string } {
+  return {
+    provider: localStorage.getItem("gradpilot.provider") ?? "openai",
+    key: localStorage.getItem("gradpilot.key") ?? "",
+  };
+}
+
+export function saveKey(provider: string, key: string): void {
+  localStorage.setItem("gradpilot.provider", provider);
+  if (key) localStorage.setItem("gradpilot.key", key);
+  else localStorage.removeItem("gradpilot.key");
+}
+
+function headers(): Record<string, string> {
+  const { provider, key } = readKey();
+  return key
+    ? { "X-Session-Id": sessionId(), "X-LLM-Provider": provider, "X-LLM-Key": key }
+    : { "X-Session-Id": sessionId() };
+}
+
+export async function wallet(): Promise<Wallet> {
   const response = await fetch(`${BASE}/api/quota`, {
     headers: { "X-Session-Id": sessionId() },
   });
-  return (await response.json()).remaining;
+  return await response.json();
+}
+
+export async function startCheckout(): Promise<string> {
+  const response = await fetch(`${BASE}/api/checkout`, {
+    method: "POST",
+    headers: { "X-Session-Id": sessionId() },
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.detail ?? "Checkout is unavailable.");
+  return body.url;
 }
 
 /** POST + SSE. EventSource cannot POST, so the stream is parsed by hand. */
 export async function* streamRun(posting: string, cv: string): AsyncGenerator<RunEvent> {
   const response = await fetch(`${BASE}/api/run`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Session-Id": sessionId() },
+    headers: { "Content-Type": "application/json", ...headers() },
     body: JSON.stringify({ posting, cv }),
   });
   if (!response.ok || !response.body) {

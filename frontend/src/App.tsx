@@ -4,7 +4,10 @@ import {
   AlertIcon, CheckIcon, CopyIcon, CriticIcon, InterviewerIcon, MatcherIcon,
   LinkIcon, ScoutIcon, SparkIcon, UploadIcon, WriterIcon,
 } from "./components/icons";
-import { extractFile, importPosting, quotaLeft, streamRun, type RunEvent } from "./api";
+import {
+  extractFile, importPosting, readKey, saveKey, startCheckout, streamRun, wallet,
+  type RunEvent, type Wallet,
+} from "./api";
 import { SAMPLE_CV, SAMPLE_POSTING } from "./sample";
 
 const MIN_CHARS = 40;
@@ -28,11 +31,13 @@ export function App() {
   const [passes, setPasses] = useState<Record<string, number>>({});
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState("");
-  const [left, setLeft] = useState<number | null>(null);
+  const [money, setMoney] = useState<Wallet | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
+  const refreshWallet = () => wallet().then(setMoney).catch(() => setMoney(null));
+
   useEffect(() => {
-    quotaLeft().then(setLeft).catch(() => setLeft(null));
+    refreshWallet();
   }, []);
 
   // The bookmarklet hands the posting over in the URL fragment. A fragment is never
@@ -60,7 +65,7 @@ export function App() {
     }
     setActive(null);
     setRunning(false);
-    quotaLeft().then(setLeft).catch(() => undefined);
+    refreshWallet();
     resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -126,14 +131,14 @@ export function App() {
               {!ready && !running && (
                 <span className="help">Both boxes need at least {MIN_CHARS} characters.</span>
               )}
-              {left !== null && (
-                <span className="quota">{left} free {left === 1 ? "run" : "runs"} left</span>
-              )}
+              {money && <Wallet money={money} />}
             </div>
 
             {error && (
               <p className="banner error" role="alert"><AlertIcon /> {error}</p>
             )}
+
+            <KeyBox onChange={refreshWallet} />
           </section>
 
           <section className="card" aria-labelledby="pipeline-heading">
@@ -177,6 +182,98 @@ export function App() {
         </footer>
       </div>
     </>
+  );
+}
+
+function Wallet({ money }: { money: Wallet }) {
+  const { key } = readKey();
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+
+  if (key) return <span className="quota">Unlimited — billed to your own key</span>;
+
+  const left = money.remaining + money.credits;
+  return (
+    <span className="quota">
+      {left} {left === 1 ? "run" : "runs"} left
+      {money.credits > 0 && ` (${money.credits} paid)`}
+      {money.can_buy && left <= 2 && (
+        <>
+          {" · "}
+          <button
+            className="ghost tiny"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                window.location.href = await startCheckout();
+              } catch (e) {
+                setProblem(e instanceof Error ? e.message : String(e));
+                setBusy(false);
+              }
+            }}
+          >
+            Buy {money.package.runs} runs — {money.package.price}
+          </button>
+        </>
+      )}
+      {problem && <span className="help problem"> {problem}</span>}
+    </span>
+  );
+}
+
+/** Bring your own key: the run is billed to the user, so the server pays nothing. */
+function KeyBox({ onChange }: { onChange: () => void }) {
+  const saved = readKey();
+  const [provider, setProvider] = useState(saved.provider);
+  const [key, setKey] = useState(saved.key);
+
+  return (
+    <details className="tip keybox">
+      <summary>{saved.key ? "Using your own API key" : "Use your own API key (unlimited runs)"}</summary>
+      <p className="help">
+        Paste a key and every run goes to your account instead of the free pool. It is kept
+        in this browser, sent with each request, and never written down on the server.
+      </p>
+      <div className="tool-row">
+        <select
+          aria-label="Model provider"
+          value={provider}
+          onChange={(e) => {
+            setProvider(e.target.value);
+            saveKey(e.target.value, key);
+            onChange();
+          }}
+        >
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic</option>
+          <option value="gemini">Gemini</option>
+        </select>
+        <input
+          type="password"
+          aria-label="API key"
+          placeholder="sk-…"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          onBlur={() => {
+            saveKey(provider, key.trim());
+            onChange();
+          }}
+        />
+        {key && (
+          <button
+            className="ghost tiny"
+            onClick={() => {
+              setKey("");
+              saveKey(provider, "");
+              onChange();
+            }}
+          >
+            Forget key
+          </button>
+        )}
+      </div>
+    </details>
   );
 }
 
