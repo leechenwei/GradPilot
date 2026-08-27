@@ -1,0 +1,15 @@
+# Render blueprint: New > Blueprint > pick this repo. No dashboard fiddling.
+services:
+  - type: web
+    name: gradpilot-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -e .
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: GRADPILOT_LLM_PROVIDER
+        value: mock
+      - key: OPENAI_API_KEY
+        sync: false   # set it in the dashboard; never commit a key
