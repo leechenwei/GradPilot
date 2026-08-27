@@ -5,6 +5,7 @@ import {
   ScoutIcon, SparkIcon, WriterIcon,
 } from "./components/icons";
 import { quotaLeft, streamRun, type RunEvent } from "./api";
+import { SAMPLE_CV, SAMPLE_POSTING } from "./sample";
 
 const MIN_CHARS = 40;
 
@@ -96,6 +97,16 @@ export function App() {
             <div className="actions">
               <button onClick={go} disabled={!ready || running} aria-busy={running}>
                 {running ? "Running the agents…" : "Tailor my application"}
+              </button>
+              <button
+                className="ghost"
+                disabled={running}
+                onClick={() => {
+                  setPosting(SAMPLE_POSTING);
+                  setCv(SAMPLE_CV);
+                }}
+              >
+                Fill a sample
               </button>
               {!ready && !running && (
                 <span className="help">Both boxes need at least {MIN_CHARS} characters.</span>
