@@ -1,0 +1,53 @@
+:root {
+  --bg: #0f1115;
+  --card: #171a21;
+  --line: #262b36;
+  --text: #e7e9ee;
+  --muted: #9aa3b2;
+  --accent: #5b8cff;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body { margin: 0; background: var(--bg); color: var(--text); }
+main { max-width: 60rem; margin: 0 auto; padding: 2rem 1rem 5rem; }
+h1 { margin: 0; font-size: 2rem; letter-spacing: -0.02em; }
+header p { color: var(--muted); }
+.quota { font-size: 0.85rem; }
+
+.inputs { display: grid; gap: 1rem; grid-template-columns: 1fr 1fr; }
+@media (max-width: 40rem) { .inputs { grid-template-columns: 1fr; } }
+label { display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.9rem; color: var(--muted); }
+textarea {
+  background: var(--card); color: var(--text); border: 1px solid var(--line);
+  border-radius: 0.6rem; padding: 0.75rem; font: inherit; font-size: 0.9rem; resize: vertical;
+}
+textarea:focus { outline: 2px solid var(--accent); }
+
+button {
+  margin-top: 1rem; padding: 0.7rem 1.2rem; border: 0; border-radius: 0.6rem;
+  background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer;
+}
+button:disabled { background: var(--line); color: var(--muted); cursor: not-allowed; }
+.hint { color: var(--muted); font-size: 0.85rem; }
+.error { color: #f87171; }
+
+.pipeline { display: grid; gap: 0.5rem; padding: 0; margin: 1.5rem 0; list-style: none; }
+.pipeline li {
+  display: flex; align-items: baseline; gap: 0.75rem; padding: 0.6rem 0.9rem;
+  border: 1px solid var(--line); border-radius: 0.6rem; opacity: 0.5;
+}
+.pipeline li.on { opacity: 1; border-color: var(--accent); }
+.pipeline li.done { opacity: 1; }
+.pipeline span { color: var(--muted); font-size: 0.85rem; }
+.pipeline em { margin-left: auto; color: var(--warn); font-style: normal; font-size: 0.8rem; }
+
+.results { display: grid; gap: 1rem; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 0.8rem; padding: 1rem 1.2rem; }
+.card h2 { margin-top: 0; font-size: 1rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.card pre { white-space: pre-wrap; font: inherit; }
+.ok { color: var(--ok); }
+.warn { color: var(--warn); }
+.why { color: var(--muted); font-size: 0.85rem; }
+summary { cursor: pointer; font-weight: 600; }
