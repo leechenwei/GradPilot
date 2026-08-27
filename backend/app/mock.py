@@ -112,7 +112,8 @@ def _critique(prompt: str) -> dict[str, Any]:
     filler = sum(prompt.lower().count(w) for w in ("passionate", "fast learner", "great fit"))
     evidence = min(1.0, numbers / 12)
     tone = max(0.0, 1.0 - filler * 0.25)
-    score = round(0.5 * evidence + 0.3 * tone + 0.2, 2)
+    # A canned reviewer that hands out 1.00 reads as fake. Cap it.
+    score = round(min(0.95, 0.5 * evidence + 0.3 * tone + 0.2), 2)
     notes = []
     if evidence < 0.6:
         notes.append("Bullets state duties, not results. Add a number to each one.")
