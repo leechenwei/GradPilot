@@ -48,6 +48,11 @@ npm run dev
 
 Open http://localhost:5173.
 
+Upload a PDF CV or fetch a public job ad by URL from the same screen: the
+backend extracts the text and hands the agents the same plain text a paste would
+have produced. Big job boards (LinkedIn, Indeed, JobStreet, Seek) block server
+fetches behind a login, so those fail fast and tell you to paste instead.
+
 With no API key set the backend runs in **mock mode**: the full agent graph
 executes with deterministic canned model responses, so the UI, streaming and
 revision loop are fully demoable offline. Set one of the following to use a real

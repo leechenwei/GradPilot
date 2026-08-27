@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { AdSlot } from "./components/AdSlot";
 import {
   AlertIcon, CheckIcon, CopyIcon, CriticIcon, InterviewerIcon, MatcherIcon,
-  ScoutIcon, SparkIcon, WriterIcon,
+  LinkIcon, ScoutIcon, SparkIcon, UploadIcon, WriterIcon,
 } from "./components/icons";
-import { quotaLeft, streamRun, type RunEvent } from "./api";
+import { extractFile, importPosting, quotaLeft, streamRun, type RunEvent } from "./api";
 import { SAMPLE_CV, SAMPLE_POSTING } from "./sample";
 
 const MIN_CHARS = 40;
@@ -86,12 +86,16 @@ export function App() {
                 id="posting" label="Job posting" value={posting} onChange={setPosting}
                 placeholder="Paste the full posting, including the requirements list."
                 help="The whole ad works better than a summary — the Scout reads the requirements verbatim."
-              />
+              >
+                <UrlImport onText={setPosting} />
+              </Field>
               <Field
                 id="cv" label="Your CV" value={cv} onChange={setCv}
                 placeholder="Paste your CV as plain text."
-                help="Plain text only. Nothing is stored — it lives in this browser tab."
-              />
+                help="PDF or plain text. Nothing is stored — the file is parsed in memory and dropped."
+              >
+                <FileImport onText={setCv} />
+              </Field>
             </div>
 
             <div className="actions">
@@ -167,7 +171,7 @@ export function App() {
 
 function Field(props: {
   id: string; label: string; value: string; placeholder: string; help: string;
-  onChange: (v: string) => void;
+  onChange: (v: string) => void; children?: React.ReactNode;
 }) {
   const short = props.value.length > 0 && props.value.trim().length < MIN_CHARS;
   return (
@@ -185,7 +189,83 @@ function Field(props: {
         aria-describedby={`${props.id}-help`}
         onChange={(e) => props.onChange(e.target.value)}
       />
+      {props.children}
       <p className="help" id={`${props.id}-help`}>{props.help}</p>
+    </div>
+  );
+}
+
+/** Pull a public job ad in by URL. Big boards block bots, so failure is normal here. */
+function UrlImport({ onText }: { onText: (text: string) => void }) {
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+
+  async function fetchIt() {
+    setBusy(true);
+    setProblem("");
+    try {
+      onText(await importPosting(url));
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e));
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div className="tool">
+      <div className="tool-row">
+        <input
+          type="url"
+          inputMode="url"
+          aria-label="Job posting URL"
+          placeholder="https://company.com/careers/data-engineer"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+        />
+        <button className="ghost tiny" onClick={fetchIt} disabled={busy || url.length < 8}>
+          <LinkIcon /> {busy ? "Fetching…" : "Fetch"}
+        </button>
+      </div>
+      {problem && <p className="help problem" role="status">{problem}</p>}
+    </div>
+  );
+}
+
+/** Read a PDF or text CV in the browser and hand the extracted text back. */
+function FileImport({ onText }: { onText: (text: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+  const [name, setName] = useState("");
+
+  return (
+    <div className="tool">
+      <div className="tool-row">
+        <label className="filepick">
+          <UploadIcon /> {busy ? "Reading…" : "Upload PDF"}
+          <input
+            type="file"
+            accept=".pdf,.txt,.md"
+            disabled={busy}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              setBusy(true);
+              setProblem("");
+              setName(file.name);
+              try {
+                onText(await extractFile(file));
+              } catch (err) {
+                setProblem(err instanceof Error ? err.message : String(err));
+              }
+              setBusy(false);
+              e.target.value = "";
+            }}
+          />
+        </label>
+        {name && !problem && <span className="help">{name}</span>}
+      </div>
+      {problem && <p className="help problem" role="status">{problem}</p>}
     </div>
   );
 }

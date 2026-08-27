@@ -1,0 +1,99 @@
+import io
+
+import pytest
+from fastapi.testclient import TestClient
+from pypdf import PdfWriter
+
+from app import ingest
+from app.main import app
+
+CV_TEXT = (
+    "Chen Wei, CS graduate. Built a Python REST API for a campus club with 40 users. "
+    "Coursework in SQL and machine learning."
+)
+
+
+def blank_pdf() -> bytes:
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+def test_text_upload_is_cleaned():
+    text = ingest.text_from_upload("cv.txt", (CV_TEXT + "\n\n\n\n  spaced   out").encode())
+    assert "spaced out" in text
+    assert "\n\n\n" not in text
+
+
+def test_unsupported_extension_is_refused():
+    with pytest.raises(ingest.IngestError, match="PDF"):
+        ingest.text_from_upload("cv.docx", b"x" * 100)
+
+
+def test_oversized_upload_is_refused():
+    with pytest.raises(ingest.IngestError, match="5 MB"):
+        ingest.text_from_upload("cv.pdf", b"x" * (ingest.MAX_UPLOAD_BYTES + 1))
+
+
+def test_image_only_pdf_tells_the_user_why():
+    """A scanned CV has pages but no text layer. Say so instead of returning ''."""
+    with pytest.raises(ingest.IngestError, match="scan"):
+        ingest.text_from_upload("scan.pdf", blank_pdf())
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://169.254.169.254/latest/meta-data/",  # cloud metadata
+        "http://127.0.0.1:8000/api/health",
+        "http://localhost/",
+        "file:///etc/passwd",
+        "http://[::1]/",
+    ],
+)
+def test_ssrf_targets_are_refused(url):
+    with pytest.raises(ingest.IngestError):
+        ingest.fetch_posting(url)
+
+
+def test_walled_boards_fail_fast_with_advice():
+    with pytest.raises(ingest.IngestError, match="paste"):
+        ingest.fetch_posting("https://www.linkedin.com/jobs/view/123456")
+
+
+def test_html_is_reduced_to_visible_text():
+    html = (
+        "<html><head><style>.a{color:red}</style></head><body>"
+        "<script>alert(1)</script><h1>Data Engineer</h1>"
+        "<p>We need Python &amp; SQL.</p></body></html>"
+    )
+    text = ingest._html_text(html)
+    assert "Data Engineer" in text
+    assert "We need Python & SQL." in text
+    assert "alert" not in text and "color:red" not in text
+
+
+def test_extract_endpoint_returns_text():
+    client = TestClient(app)
+    response = client.post(
+        "/api/extract", files={"file": ("cv.txt", CV_TEXT.encode(), "text/plain")}
+    )
+    assert response.status_code == 200
+    assert response.json()["chars"] == len(CV_TEXT)
+
+
+def test_extract_endpoint_rejects_bad_file_with_a_readable_message():
+    client = TestClient(app)
+    response = client.post(
+        "/api/extract", files={"file": ("cv.docx", b"x" * 50, "application/msword")}
+    )
+    assert response.status_code == 400
+    assert "paste" in response.json()["detail"].lower()
+
+
+def test_import_endpoint_refuses_private_targets():
+    client = TestClient(app)
+    response = client.post("/api/import", json={"url": "http://127.0.0.1:8000/"})
+    assert response.status_code == 400

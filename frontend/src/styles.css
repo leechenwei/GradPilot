@@ -177,3 +177,22 @@ footer { margin-top: var(--step-12); color: var(--muted); font-size: 0.85rem; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* Import tools that sit above each textarea */
+.tool { display: grid; gap: var(--step-2); }
+.tool-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--step-2); }
+.tool input[type="url"] {
+  flex: 1 1 14rem; min-height: 2.25rem; padding: 0 var(--step-3);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg); color: var(--text); font: inherit; font-size: 0.9rem;
+}
+.filepick {
+  display: inline-flex; align-items: center; gap: var(--step-2); min-height: 2.25rem;
+  padding: 0 var(--step-3); border: 1px solid var(--line); border-radius: var(--radius);
+  color: var(--brand); font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  transition: background 200ms ease;
+}
+.filepick:hover { background: var(--brand-soft); }
+.filepick:focus-within { outline: 3px solid var(--brand); outline-offset: 2px; }
+.filepick input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.help.problem { color: var(--warn); }

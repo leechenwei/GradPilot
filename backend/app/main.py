@@ -4,13 +4,14 @@ import json
 import logging
 import uuid
 from collections.abc import Iterator
+from typing import Annotated
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app import quota
+from app import ingest, quota
 from app.graph import run
 from app.llm import LLMError, provider
 
@@ -44,6 +45,31 @@ def health() -> dict[str, str]:
 @app.get("/api/quota")
 def get_quota(x_session_id: str = Header(default="anonymous")) -> dict[str, int]:
     return {"remaining": quota.remaining(x_session_id), "free_runs": quota.FREE_RUNS}
+
+
+class ImportRequest(BaseModel):
+    url: str = Field(min_length=8, max_length=2_000)
+
+
+@app.post("/api/extract")
+async def extract(file: Annotated[UploadFile, File()]) -> dict[str, str | int]:
+    """PDF or text file in, plain text out. Nothing is written to disk."""
+    blob = await file.read(ingest.MAX_UPLOAD_BYTES + 1)
+    try:
+        text = ingest.text_from_upload(file.filename or "", blob)
+    except ingest.IngestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"text": text, "chars": len(text)}
+
+
+@app.post("/api/import")
+def import_posting(body: ImportRequest) -> dict[str, str | int]:
+    """Fetch a public job ad by URL. Most big boards will refuse — that is expected."""
+    try:
+        text = ingest.fetch_posting(body.url)
+    except ingest.IngestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"text": text, "chars": len(text)}
 
 
 @app.post("/api/run")

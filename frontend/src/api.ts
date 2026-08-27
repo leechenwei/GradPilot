@@ -4,7 +4,9 @@ export type RunEvent =
   | { type: "done"; result: Record<string, unknown> }
   | { type: "error"; message: string };
 
-const BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
+// `||`, not `??`: an env var that reaches the build as "" would otherwise make every
+// call same-origin and 404 on the host serving the page.
+const BASE = import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/, "") || "http://localhost:8000";
 
 /** One id per browser, so the free-run cap survives a reload. */
 export function sessionId(): string {
@@ -49,4 +51,28 @@ export async function* streamRun(posting: string, cv: string): AsyncGenerator<Ru
       if (line.startsWith("data: ")) yield JSON.parse(line.slice(6)) as RunEvent;
     }
   }
+}
+
+async function post(path: string, init: RequestInit): Promise<{ text: string }> {
+  const response = await fetch(`${BASE}${path}`, init);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.detail ?? `Request failed (${response.status})`);
+  return body;
+}
+
+/** PDF or text file in, plain text back. The file never leaves memory server-side. */
+export async function extractFile(file: File): Promise<string> {
+  const form = new FormData();
+  form.append("file", file);
+  return (await post("/api/extract", { method: "POST", body: form })).text;
+}
+
+export async function importPosting(url: string): Promise<string> {
+  return (
+    await post("/api/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    })
+  ).text;
 }
