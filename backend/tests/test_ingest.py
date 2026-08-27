@@ -97,3 +97,35 @@ def test_import_endpoint_refuses_private_targets():
     client = TestClient(app)
     response = client.post("/api/import", json={"url": "http://127.0.0.1:8000/"})
     assert response.status_code == 400
+
+
+class _FakeSocket:
+    def __init__(self, peer: str) -> None:
+        self._peer = peer
+
+    def getpeername(self) -> tuple[str, int]:
+        return (self._peer, 443)
+
+
+class _FakeStream:
+    def __init__(self, peer: str) -> None:
+        self._sock = _FakeSocket(peer)
+
+    def get_extra_info(self, _name: str) -> _FakeSocket:
+        return self._sock
+
+
+def _response_from(peer: str):
+    import httpx
+
+    return httpx.Response(200, extensions={"network_stream": _FakeStream(peer)})
+
+
+def test_peer_check_blocks_a_rebound_private_address():
+    """DNS said public at pre-flight; the socket actually landed inside. Refuse."""
+    with pytest.raises(ingest.IngestError, match="private network"):
+        ingest._guard_peer(_response_from("169.254.169.254"))
+
+
+def test_peer_check_allows_a_public_address():
+    ingest._guard_peer(_response_from("93.184.216.34"))

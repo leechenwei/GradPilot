@@ -64,31 +64,61 @@ def _pdf_text(blob: bytes) -> str:
 def fetch_posting(url: str) -> str:
     """GET a job ad and return its visible text. Refuses anything not public HTTP."""
     _guard_url(url)
+    headers = {"User-Agent": USER_AGENT, "Accept": "text/html,*/*"}
     try:
-        response = httpx.get(
-            url,
-            timeout=FETCH_TIMEOUT,
-            headers={"User-Agent": USER_AGENT, "Accept": "text/html,*/*"},
-            follow_redirects=False,  # a redirect can point back inside the network
-        )
+        with httpx.Client(timeout=FETCH_TIMEOUT, follow_redirects=False) as client:
+            # Streamed so the socket can be checked before a single byte of body is read:
+            # the pre-flight DNS answer and the one httpx connects with are two lookups,
+            # and a rebinding host can answer public then private between them.
+            with client.stream("GET", url, headers=headers) as response:
+                _guard_peer(response)
+                if response.status_code in (301, 302, 303, 307, 308):
+                    raise IngestError(
+                        "That link redirects. Open it, copy the final URL, and try that."
+                    )
+                if response.status_code >= 400:
+                    raise IngestError(
+                        f"The site answered {response.status_code}. Most job boards block "
+                        "bots — paste the posting text instead."
+                    )
+                blob = b""
+                for chunk in response.iter_bytes():
+                    blob += chunk
+                    if len(blob) >= MAX_FETCH_BYTES:
+                        break
+                encoding = response.encoding or "utf-8"
     except httpx.HTTPError as exc:
         raise IngestError("That page could not be reached. Paste the posting instead.") from exc
 
-    if response.status_code in (301, 302, 303, 307, 308):
-        raise IngestError("That link redirects. Open it, copy the final URL, and try that.")
-    if response.status_code >= 400:
-        raise IngestError(
-            f"The site answered {response.status_code}. Most job boards block bots — "
-            "paste the posting text instead."
-        )
-    body = response.content[:MAX_FETCH_BYTES].decode(response.encoding or "utf-8", "replace")
-    text = _clean(_html_text(body))
+    text = _clean(_html_text(blob[:MAX_FETCH_BYTES].decode(encoding, "replace")))
     if len(text) < 200:
         raise IngestError(
             "That page loaded but held almost no text, so it is rendered by JavaScript "
             "or behind a login. Paste the posting instead."
         )
     return text
+
+
+def _check_ip(raw: str) -> None:
+    """One rule for both the pre-flight lookup and the socket actually connected."""
+    address = ipaddress.ip_address(raw)
+    # SSRF: without this, a link resolving to 169.254.169.254 reads cloud metadata.
+    if not address.is_global or address.is_loopback or address.is_private:
+        raise IngestError("That link points inside a private network.")
+
+
+def _guard_peer(response: httpx.Response) -> None:
+    """Re-check the peer of the open socket, which defeats a DNS rebinding swap.
+
+    # ponytail: this blocks reading an internal response, not the bare connect. A
+    # blind request can still reach the peer. Pin the validated IP with a custom
+    # transport if a blind hit ever matters here.
+    """
+    stream = response.extensions.get("network_stream")
+    sock = stream.get_extra_info("socket") if stream is not None else None
+    peer = sock.getpeername() if sock is not None else None
+    if peer:
+        _check_ip(str(peer[0]))
 
 
 def _guard_url(url: str) -> None:
@@ -106,10 +136,7 @@ def _guard_url(url: str) -> None:
     except socket.gaierror as exc:
         raise IngestError("That host does not resolve.") from exc
     for info in infos:
-        address = ipaddress.ip_address(info[4][0])
-        # SSRF: without this, a link resolving to 169.254.169.254 reads cloud metadata.
-        if not address.is_global or address.is_loopback or address.is_private:
-            raise IngestError("That link points inside a private network.")
+        _check_ip(str(info[4][0]))
 
 
 class _Stripper(HTMLParser):
