@@ -44,7 +44,7 @@ quality gate.
 | Evals | 7 behaviour tests, including "critic rejects then approves" | Ragas faithfulness/relevance, positive AND negative cases, CI gate |
 | Scalability | Single process, in-memory quota | Stateless workers, Redis quota, queue for long runs |
 | Performance | Mock run is instant; real run is 5–7 serial LLM calls | Parallelise scout+matcher, cache by posting hash, stream tokens |
-| Security | Input length caps, no secrets client-side, no data stored | Authn, rate limit by IP, prompt-injection guard on pasted postings, PII handling policy |
+| Security | Input length caps, per-IP daily cap, redacted upstream errors, no data stored | Real authn (the session id is client-supplied, so the per-session cap is a UX affordance, not a control), prompt-injection guard on pasted postings, PII handling policy |
 | Usability | Streaming pipeline view, copy buttons, empty/error states | Onboarding sample, export to DOCX/PDF, run history |
 | Maintainability | Typed, linted, CI on both halves, one LLM seam | Prompt versioning, ADRs, contract tests per agent |
 

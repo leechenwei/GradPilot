@@ -1,4 +1,5 @@
 import json
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +12,8 @@ POSTING = (
     "Junior Backend Engineer\nWe need Python, FastAPI and SQL. Docker is a plus. "
     "Small team, ships weekly, values ownership."
 )
+SESSION = "11111111-2222-4333-8444-555555555555"
+
 CV = (
     "Chen Wei, CS graduate. Built a Python REST API for a campus club. "
     "Coursework in SQL and data structures. Comfortable with git."
@@ -61,9 +64,9 @@ def test_final_result_is_approved_and_complete():
 
 def test_run_endpoint_streams_sse_and_spends_quota():
     client = TestClient(app)
-    before = client.get("/api/quota", headers={"X-Session-Id": "s1"}).json()["remaining"]
+    before = client.get("/api/quota", headers={"X-Session-Id": SESSION}).json()["remaining"]
     response = client.post(
-        "/api/run", json={"posting": POSTING, "cv": CV}, headers={"X-Session-Id": "s1"}
+        "/api/run", json={"posting": POSTING, "cv": CV}, headers={"X-Session-Id": SESSION}
     )
     assert response.status_code == 200
     payloads = [
@@ -72,16 +75,37 @@ def test_run_endpoint_streams_sse_and_spends_quota():
         if line.startswith("data: ")
     ]
     assert payloads[-1]["type"] == "done"
-    after = client.get("/api/quota", headers={"X-Session-Id": "s1"}).json()["remaining"]
+    after = client.get("/api/quota", headers={"X-Session-Id": SESSION}).json()["remaining"]
     assert after == before - 1
+
+
+def test_forged_session_headers_still_hit_the_ip_backstop(monkeypatch):
+    monkeypatch.setattr(quota, "IP_RUNS_PER_DAY", 3)
+    client = TestClient(app)
+    body = {"posting": POSTING, "cv": CV}
+    codes = [
+        client.post("/api/run", json=body, headers={"X-Session-Id": str(uuid.uuid4())}).status_code
+        for _ in range(4)
+    ]
+    assert codes[:3] == [200, 200, 200]
+    assert codes[3] == 429, "a fresh session id per request bypassed the cap"
+
+
+def test_junk_session_headers_share_one_bucket_and_do_not_grow_the_map():
+    client = TestClient(app)
+    body = {"posting": POSTING, "cv": CV}
+    for i in range(quota.FREE_RUNS + 1):
+        client.post("/api/run", json=body, headers={"X-Session-Id": f"junk-{i}"})
+    assert len(quota._used) <= 4, "attacker-supplied ids each got their own entry"
 
 
 def test_quota_blocks_after_the_free_runs():
     client = TestClient(app)
     body = {"posting": POSTING, "cv": CV}
+    sid = str(uuid.uuid4())
     for _ in range(quota.FREE_RUNS):
-        assert client.post("/api/run", json=body, headers={"X-Session-Id": "s2"}).status_code == 200
-    assert client.post("/api/run", json=body, headers={"X-Session-Id": "s2"}).status_code == 429
+        assert client.post("/api/run", json=body, headers={"X-Session-Id": sid}).status_code == 200
+    assert client.post("/api/run", json=body, headers={"X-Session-Id": sid}).status_code == 429
 
 
 def test_short_input_is_rejected():

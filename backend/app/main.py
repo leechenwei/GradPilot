@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
+import uuid
 from collections.abc import Iterator
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -11,6 +13,8 @@ from pydantic import BaseModel, Field
 from app import quota
 from app.graph import run
 from app.llm import LLMError, provider
+
+log = logging.getLogger("gradpilot")
 
 app = FastAPI(title="GradPilot")
 app.add_middleware(
@@ -38,10 +42,13 @@ def get_quota(x_session_id: str = Header(default="anonymous")) -> dict[str, int]
 
 @app.post("/api/run")
 def start_run(
-    body: RunRequest, x_session_id: str = Header(default="anonymous")
+    body: RunRequest, request: Request, x_session_id: str = Header(default="anonymous")
 ) -> StreamingResponse:
+    # ponytail: the socket peer, not X-Forwarded-For — that header is client-set.
+    # Behind a proxy, read it from the platform's trusted variant instead.
+    ip = request.client.host if request.client else "unknown"
     try:
-        left = quota.consume(x_session_id)
+        left = quota.consume(x_session_id, ip)
     except quota.QuotaExceeded as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     return StreamingResponse(
@@ -59,7 +66,10 @@ def _stream(body: RunRequest, left: int) -> Iterator[str]:
             yield _sse(event)
     except LLMError as exc:
         # The client already has a 200 and half a stream, so the error must ride the stream.
-        yield _sse({"type": "error", "message": str(exc)})
+        # Upstream text can carry keys, URLs and quota details: log it, do not echo it.
+        ref = uuid.uuid4().hex[:8]
+        log.error("llm call failed ref=%s: %s", ref, exc)
+        yield _sse({"type": "error", "message": f"The model provider failed. Reference {ref}."})
 
 
 def _sse(event: dict[str, object]) -> str:
