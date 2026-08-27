@@ -30,6 +30,12 @@ class RunRequest(BaseModel):
     cv: str = Field(min_length=40, max_length=20_000)
 
 
+@app.get("/")
+def root() -> dict[str, str]:
+    """The bare host is the first thing anyone pastes. Do not answer it with a 404."""
+    return {"service": "GradPilot API", "health": "/api/health", "docs": "/docs"}
+
+
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "provider": provider()}
