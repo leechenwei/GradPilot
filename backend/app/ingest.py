@@ -7,6 +7,7 @@ agents the same plain text a paste would have produced.
 
 from __future__ import annotations
 
+import html as html_mod
 import ipaddress
 import re
 import socket
@@ -24,6 +25,14 @@ USER_AGENT = "GradPilotBot/0.1 (+https://github.com/leechenwei/GradPilot)"
 
 # Boards that hard-block server-side fetches. Fail fast with advice, not a timeout.
 WALLED = ("linkedin.com", "indeed.com", "glassdoor.com", "jobstreet.com", "seek.com")
+
+
+# Greenhouse and Lever publish free, unauthenticated job APIs. A posting hosted on
+# either is a documented fetch, not scraping — so prefer the API over the HTML page.
+GREENHOUSE = re.compile(
+    r"greenhouse\.io/(?:embed/job_app\?for=)?([\w-]+)[/?].*?(?:jobs/|gh_jid=)(\d+)"
+)
+LEVER = re.compile(r"jobs\.lever\.co/([\w.-]+)/([0-9a-f-]{36})")
 
 
 class IngestError(ValueError):
@@ -63,6 +72,9 @@ def _pdf_text(blob: bytes) -> str:
 
 def fetch_posting(url: str) -> str:
     """GET a job ad and return its visible text. Refuses anything not public HTTP."""
+    api = _ats_api(url)
+    if api:
+        return _from_ats(*api)
     _guard_url(url)
     headers = {"User-Agent": USER_AGENT, "Accept": "text/html,*/*"}
     try:
@@ -96,6 +108,40 @@ def fetch_posting(url: str) -> str:
             "That page loaded but held almost no text, so it is rendered by JavaScript "
             "or behind a login. Paste the posting instead."
         )
+    return text
+
+
+def _ats_api(url: str) -> tuple[str, str] | None:
+    """Map a Greenhouse or Lever job page to its public JSON endpoint."""
+    if match := GREENHOUSE.search(url):
+        board, job = match.groups()
+        return "greenhouse", f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs/{job}"
+    if match := LEVER.search(url):
+        company, job = match.groups()
+        return "lever", f"https://api.lever.co/v0/postings/{company}/{job}"
+    return None
+
+
+def _from_ats(kind: str, api_url: str) -> str:
+    try:
+        response = httpx.get(api_url, timeout=FETCH_TIMEOUT, headers={"User-Agent": USER_AGENT})
+    except httpx.HTTPError as exc:
+        raise IngestError("That job board did not answer. Paste the posting instead.") from exc
+    if response.status_code == 404:
+        raise IngestError("That posting is closed or the link is wrong.")
+    if response.status_code >= 400:
+        raise IngestError(f"The job board answered {response.status_code}. Paste the text instead.")
+    data = response.json()
+    if kind == "greenhouse":
+        parts = [data.get("title", ""), data.get("location", {}).get("name", ""),
+                 _html_text(data.get("content", ""))]
+    else:
+        parts = [data.get("text", ""), (data.get("categories") or {}).get("location", ""),
+                 _html_text(data.get("description", "")),
+                 *(_html_text(item.get("content", "")) for item in data.get("lists", []))]
+    text = _clean("\n\n".join(part for part in parts if part))
+    if len(text) < 200:
+        raise IngestError("That posting came back nearly empty. Paste the text instead.")
     return text
 
 
@@ -164,6 +210,10 @@ class _Stripper(HTMLParser):
 
 
 def _html_text(html: str) -> str:
+    # ATS APIs ship the description entity-escaped inside JSON, so tags arrive as
+    # "&lt;p&gt;" and would survive the parser as literal text. Unescape first.
+    if "&lt;" in html:
+        html = html_mod.unescape(html)
     stripper = _Stripper()
     stripper.feed(html)
     return " ".join(stripper.parts)

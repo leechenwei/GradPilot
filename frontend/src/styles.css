@@ -196,3 +196,14 @@ footer { margin-top: var(--step-12); color: var(--muted); font-size: 0.85rem; }
 .filepick:focus-within { outline: 3px solid var(--brand); outline-offset: 2px; }
 .filepick input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .help.problem { color: var(--warn); }
+
+.tip { border: 0; padding: 0; }
+.tip summary { font-size: 0.85rem; color: var(--brand); font-weight: 600; }
+.tip .help { margin: var(--step-2) 0; }
+.bookmarklet {
+  display: inline-flex; align-items: center; min-height: 2.25rem; padding: 0 var(--step-4);
+  border: 1px dashed var(--brand); border-radius: var(--radius);
+  color: var(--brand); font-size: 0.85rem; font-weight: 600; text-decoration: none;
+  cursor: grab;
+}
+.bookmarklet:active { cursor: grabbing; }

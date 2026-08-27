@@ -129,3 +129,32 @@ def test_peer_check_blocks_a_rebound_private_address():
 
 def test_peer_check_allows_a_public_address():
     ingest._guard_peer(_response_from("93.184.216.34"))
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        (
+            "https://boards.greenhouse.io/discord/jobs/7616993",
+            ("greenhouse", "https://boards-api.greenhouse.io/v1/boards/discord/jobs/7616993"),
+        ),
+        (
+            "https://job-boards.greenhouse.io/vercel/jobs/6136160004?gh_src=x",
+            ("greenhouse", "https://boards-api.greenhouse.io/v1/boards/vercel/jobs/6136160004"),
+        ),
+        (
+            "https://jobs.lever.co/acme/aa2b0a3f-79b7-4a6a-9d6d-9b1234567890",
+            ("lever", "https://api.lever.co/v0/postings/acme/aa2b0a3f-79b7-4a6a-9d6d-9b1234567890"),
+        ),
+        ("https://company.com/careers/data-engineer", None),
+    ],
+)
+def test_ats_urls_map_to_their_public_api(url, expected):
+    assert ingest._ats_api(url) == expected
+
+
+def test_ats_html_arrives_entity_escaped_and_must_be_unescaped():
+    """Greenhouse ships the description escaped inside JSON: &lt;p&gt;, not <p>."""
+    text = ingest._html_text("&lt;p&gt;We need &lt;b&gt;Python&lt;/b&gt; and SQL.&lt;/p&gt;")
+    assert "We need Python and SQL." in text
+    assert "<p>" not in text and "&lt;" not in text

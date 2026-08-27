@@ -50,8 +50,11 @@ Open http://localhost:5173.
 
 Upload a PDF CV or fetch a public job ad by URL from the same screen: the
 backend extracts the text and hands the agents the same plain text a paste would
-have produced. Big job boards (LinkedIn, Indeed, JobStreet, Seek) block server
-fetches behind a login, so those fail fast and tell you to paste instead.
+have produced. Postings hosted on Greenhouse or Lever are read through their public JSON APIs.
+Big job boards (LinkedIn, Indeed, JobStreet, Seek) block server fetches behind a
+login, so those fail fast and point at the bookmarklet instead: it reads the ad
+in the user's own logged-in tab and hands the text over in the URL fragment,
+which never reaches a server.
 
 With no API key set the backend runs in **mock mode**: the full agent graph
 executes with deterministic canned model responses, so the UI, streaming and

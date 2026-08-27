@@ -35,6 +35,17 @@ export function App() {
     quotaLeft().then(setLeft).catch(() => setLeft(null));
   }, []);
 
+  // The bookmarklet hands the posting over in the URL fragment. A fragment is never
+  // sent to a server, so the ad text stays in the browser even in transit.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const imported = params.get("posting");
+    if (imported) {
+      setPosting(imported);
+      history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
+
   const ready = posting.trim().length >= MIN_CHARS && cv.trim().length >= MIN_CHARS;
 
   async function go() {
@@ -219,7 +230,7 @@ function UrlImport({ onText }: { onText: (text: string) => void }) {
           type="url"
           inputMode="url"
           aria-label="Job posting URL"
-          placeholder="https://company.com/careers/data-engineer"
+          placeholder="https://boards.greenhouse.io/… or a company careers page"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
         />
@@ -228,7 +239,38 @@ function UrlImport({ onText }: { onText: (text: string) => void }) {
         </button>
       </div>
       {problem && <p className="help problem" role="status">{problem}</p>}
+      <Bookmarklet />
     </div>
+  );
+}
+
+/** The walled boards block servers, not people. This runs in the user's own tab. */
+function Bookmarklet() {
+  const ref = useRef<HTMLAnchorElement>(null);
+
+  useEffect(() => {
+    const app = `${window.location.origin}${window.location.pathname}`;
+    const code =
+      "javascript:(function(){var s=String(window.getSelection());" +
+      "var t=s.length>200?s:(document.querySelector('main')||document.body).innerText;" +
+      `window.open('${app}#posting='+encodeURIComponent(t.slice(0,18000)),'_blank');})()`;
+    // Set it after mount: React strips javascript: hrefs written through JSX.
+    ref.current?.setAttribute("href", code);
+  }, []);
+
+  return (
+    <details className="tip">
+      <summary>LinkedIn, JobStreet or Indeed?</summary>
+      <p className="help">
+        Those sites block servers from reading them, so the fetch above will not work.
+        Drag this button to your bookmarks bar, open the job ad, and click it — it reads
+        the page in <em>your</em> browser, where you are already logged in, and sends the
+        text back here. Select part of the page first to send only that.
+      </p>
+      <a className="bookmarklet" ref={ref} href="#" onClick={(e) => e.preventDefault()}>
+        Send to GradPilot
+      </a>
+    </details>
   );
 }
 
