@@ -24,8 +24,11 @@ def _found(text: str, words: list[str]) -> list[str]:
 def mock_reply(agent: str, prompt: str) -> dict[str, Any]:
     skills = _found(prompt, _SKILLS) or ["python", "sql"]
     if agent == "scout":
+        headline = _first_line(prompt) or "Software Engineer"
+        role, company = _split_headline(headline)
         return {
-            "role": _first_line(prompt) or "Software Engineer",
+            "company": company,
+            "role": role,
             "company_signals": ["ships weekly", "small team", "values ownership"],
             "requirements": [
                 {"text": f"Hands-on {s}", "weight": 3 if i < 2 else 2}
@@ -67,6 +70,15 @@ def mock_reply(agent: str, prompt: str) -> dict[str, Any]:
             ]
         }
     raise ValueError(f"no mock reply for agent {agent!r}")
+
+
+def _split_headline(headline: str) -> tuple[str, str]:
+    """Job ads title themselves "Role — Company (Location)" often enough to try."""
+    for dash in ("—", " - ", "–", " at ", " @ "):
+        if dash in headline:
+            role, _, rest = headline.partition(dash)
+            return role.strip(), rest.split("(")[0].strip()
+    return headline.strip(), ""
 
 
 def _first_line(prompt: str) -> str:

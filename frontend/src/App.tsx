@@ -493,71 +493,123 @@ function CopyButton({ text, what }: { text: string; what: string }) {
   );
 }
 
+const TABS = [
+  { id: "verdict", label: "Critic verdict" },
+  { id: "gaps", label: "Gaps to close" },
+  { id: "bullets", label: "CV bullets" },
+  { id: "letter", label: "Cover letter" },
+  { id: "prep", label: "Interview prep" },
+] as const;
+
 function Results({ result }: { result: Result }) {
+  const [tab, setTab] = useState<string>("verdict");
   const critique = result.critique ?? {};
   const score = Number(critique.score ?? 0);
   const bullets: string[] = result.draft?.bullets ?? [];
   const letter: string = result.draft?.cover_letter ?? "";
+  const role: string = result.scout?.role ?? "";
+  const company: string = result.scout?.company ?? "";
+
+  // Arrow keys move between tabs: a tablist that only responds to clicks is broken
+  // for keyboard users, and this is the main navigation of the whole result.
+  function onKey(event: React.KeyboardEvent) {
+    const index = TABS.findIndex((t) => t.id === tab);
+    if (event.key === "ArrowRight") setTab(TABS[(index + 1) % TABS.length].id);
+    if (event.key === "ArrowLeft") setTab(TABS[(index - 1 + TABS.length) % TABS.length].id);
+  }
 
   return (
     <section className="results" aria-label="Results">
-      <div className="card">
-        <h2>Critic verdict</h2>
-        <div className="verdict">
-          <span className="score">{score.toFixed(2)}</span>
-          <span className="meter"><i style={{ width: `${Math.round(score * 100)}%` }} /></span>
-          <span className={`pill ${result.approved ? "ok" : "warn"}`}>
-            {result.approved ? <CheckIcon /> : <AlertIcon />}
-            {result.approved ? "Approved" : "Still weak"}
-          </span>
+      <header className="result-head">
+        <div>
+          <h2>{role || "Your tailored application"}</h2>
+          {company && <p className="sub">for {company}</p>}
         </div>
-        <ul className="list" style={{ marginTop: "1rem" }}>
-          {(critique.notes ?? []).map((n: string) => <li key={n}>{n}</li>)}
-        </ul>
+        <span className={`pill ${result.approved ? "ok" : "warn"}`}>
+          {result.approved ? <CheckIcon /> : <AlertIcon />}
+          {result.approved ? "Approved" : "Best of " + (result.passes ?? 1) + " drafts"}
+        </span>
+      </header>
+
+      <div className="tabs" role="tablist" aria-label="Result sections" onKeyDown={onKey}>
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            role="tab"
+            id={`tab-${t.id}`}
+            aria-selected={tab === t.id}
+            aria-controls={`panel-${t.id}`}
+            tabIndex={tab === t.id ? 0 : -1}
+            className={`tab ${tab === t.id ? "on" : ""}`}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      <div className="card">
-        <h2>Gaps to close</h2>
-        <ul className="list">
-          {(result.matcher?.gaps ?? []).map((g: { requirement: string; advice: string }) => (
-            <li key={g.requirement} className="gap">
-              <b>{g.requirement}</b>
-              <span>{g.advice}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <div className="card panel" role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
+        {tab === "verdict" && (
+          <>
+            <div className="verdict">
+              <span className="score">{score.toFixed(2)}</span>
+              <span className="meter"><i style={{ width: `${Math.round(score * 100)}%` }} /></span>
+            </div>
+            <ul className="list">
+              {(critique.notes ?? []).map((n: string) => <li key={n}>{n}</li>)}
+            </ul>
+          </>
+        )}
 
-      <div className="card">
-        <div className="card-head">
-          <h2>Tailored CV bullets</h2>
-          <CopyButton text={bullets.join("\n")} what="the tailored bullets" />
-        </div>
-        <ul className="list">{bullets.map((b) => <li key={b}>{b}</li>)}</ul>
-      </div>
+        {tab === "gaps" && (
+          <ul className="list">
+            {(result.matcher?.gaps ?? []).map((g: { requirement: string; advice: string }) => (
+              <li key={g.requirement} className="gap">
+                <b>{g.requirement}</b>
+                <span>{g.advice}</span>
+              </li>
+            ))}
+          </ul>
+        )}
 
-      <div className="card">
-        <div className="card-head">
-          <h2>Cover letter</h2>
-          <CopyButton text={letter} what="the cover letter" />
-        </div>
-        <pre className="letter">{letter}</pre>
-      </div>
+        {tab === "bullets" && (
+          <>
+            <div className="card-head">
+              <span className="help">Paste these over the matching lines in your CV.</span>
+              <CopyButton text={bullets.join("\n")} what="the tailored bullets" />
+            </div>
+            <ul className="list">{bullets.map((b) => <li key={b}>{b}</li>)}</ul>
+          </>
+        )}
 
-      <div className="card">
-        <h2>Interview prep</h2>
-        {(result.interviewer?.questions ?? []).map(
-          (q: { question: string; why: string; star: Record<string, string> }) => (
-            <details key={q.question}>
-              <summary>{q.question}</summary>
-              <p className="why">{q.why}</p>
-              <ul className="star">
-                {Object.entries(q.star).map(([k, v]) => (
-                  <li key={k}><b>{k}</b><span>{v}</span></li>
-                ))}
-              </ul>
-            </details>
-          ),
+        {tab === "letter" && (
+          <>
+            <div className="card-head">
+              <span className="help">
+                {letter.split(/\s+/).filter(Boolean).length} words
+              </span>
+              <CopyButton text={letter} what="the cover letter" />
+            </div>
+            <pre className="letter">{letter}</pre>
+          </>
+        )}
+
+        {tab === "prep" && (
+          <>
+            {(result.interviewer?.questions ?? []).map(
+              (q: { question: string; why: string; star: Record<string, string> }) => (
+                <details key={q.question}>
+                  <summary>{q.question}</summary>
+                  <p className="why">{q.why}</p>
+                  <ul className="star">
+                    {Object.entries(q.star).map(([k, v]) => (
+                      <li key={k}><b>{k}</b><span>{v}</span></li>
+                    ))}
+                  </ul>
+                </details>
+              ),
+            )}
+          </>
         )}
       </div>
     </section>

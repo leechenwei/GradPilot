@@ -15,8 +15,9 @@ APPROVAL_THRESHOLD = 0.8
 MAX_REVISIONS = 2
 
 SYSTEM = {
-    "scout": "You parse job postings. Reply with JSON: role, company_signals[], "
-             "requirements[{text, weight 1-3}]. Never invent requirements.",
+    "scout": "You parse job postings. Reply with JSON: company, role, company_signals[], "
+             "requirements[{text, weight 1-3}]. Use \"\" for company if the posting "
+             "does not name one. Never invent requirements.",
     "matcher": "You score a CV against requirements. Reply with JSON: overall_fit 0-1, "
                "strengths[{requirement, evidence}], gaps[{requirement, advice}]. "
                "Evidence must be quoted from the CV.",
