@@ -202,12 +202,18 @@ def _stream(body: RunRequest, left: int, creds: Creds | None = None) -> Iterator
         # Upstream text can carry keys, URLs and quota details: log it, do not echo it.
         ref = uuid.uuid4().hex[:8]
         log.error("llm call failed ref=%s byok=%s: %s", ref, bool(creds), exc)
-        detail = (
-            f"Your {creds.provider} key was rejected, or that account has no credit. "
-            "Check the key, or clear it to use the free runs."
-            if creds
-            else f"The model provider failed. Reference {ref}."
-        )
+        if creds:
+            fallback = (
+                "clear it to use the free runs"
+                if model_ready()
+                else "try another key or model"
+            )
+            detail = (
+                f"The {creds.provider} call failed: the key was rejected, the account has no "
+                f"credit, or that free model is busy. Check the key, or {fallback}."
+            )
+        else:
+            detail = f"The model provider failed. Reference {ref}."
         yield _sse({"type": "error", "message": detail})
 
 

@@ -31,6 +31,7 @@ export function App() {
   const [passes, setPasses] = useState<Record<string, number>>({});
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState("");
+  const [failed, setFailed] = useState<string | null>(null);
   const [money, setMoney] = useState<Wallet | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
@@ -60,6 +61,7 @@ export function App() {
     setRunning(true);
     setResult(null);
     setError("");
+    setFailed(null);
     setPasses({});
     try {
       for await (const event of streamRun(posting, cv)) apply(event);
@@ -80,6 +82,11 @@ export function App() {
       setResult(event.result);
     } else if (event.type === "error") {
       setError(event.message);
+      // The agent that was mid-flight is the one that broke. Do not tick it green.
+      setActive((current) => {
+        setFailed(current);
+        return null;
+      });
     }
   }
 
@@ -158,18 +165,27 @@ export function App() {
             <ol className="pipeline" aria-live="polite">
               {STAGES.map(({ id, label, blurb, Icon }) => {
                 const runs = passes[id] ?? 0;
-                const state = active === id ? "active" : runs ? "done" : "";
+                const broke = failed === id;
+                const state = broke ? "failed" : active === id ? "active" : runs ? "done" : "";
                 return (
                   <li key={id} className={`stage ${state} ${runs > 1 ? "revised" : ""}`}>
                     <span className={`dot ${active === id ? "spin" : ""}`}>
-                      {runs && active !== id ? <CheckIcon /> : <Icon />}
+                      {broke ? <AlertIcon /> : runs && active !== id ? <CheckIcon /> : <Icon />}
                     </span>
                     <span>
                       <b>{label}</b>
                       <small>{blurb}</small>
                     </span>
                     <span className="tag">
-                      {active === id ? "Running" : runs > 1 ? `${runs} passes` : runs ? "Done" : ""}
+                      {broke
+                        ? "Failed"
+                        : active === id
+                          ? "Running"
+                          : runs > 1
+                            ? `${runs} passes`
+                            : runs
+                              ? "Done"
+                              : ""}
                     </span>
                   </li>
                 );
@@ -190,7 +206,8 @@ export function App() {
         </main>
 
         <footer>
-          Built as a portfolio project. Runs offline in mock mode — no key, no data leaves the box.
+          Built as a portfolio project. Runs on the model key you supply — your CV and the
+          posting go to that provider and nowhere else, and nothing is stored here.
         </footer>
       </div>
     </>
