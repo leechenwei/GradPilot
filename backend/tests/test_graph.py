@@ -113,3 +113,34 @@ def test_short_input_is_rejected():
     client = TestClient(app)
     assert TestClient(app).post("/api/run", json={"posting": "hi", "cv": CV}).status_code == 422
     assert client.get("/api/health").json()["provider"] == "mock"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(0.72, 0.72), ("0.72", 0.72), (72, 0.72), ("72%", 0.72), ("good", 0.0), (None, 0.0)],
+)
+def test_scores_are_normalised_however_the_model_writes_them(raw, expected):
+    from app.graph import _score
+
+    assert _score({"score": raw}) == pytest.approx(expected)
+
+
+def test_the_best_draft_wins_not_the_last_one(monkeypatch):
+    """A third pass can score worse than the second. The user gets the best one."""
+    from app import graph
+
+    scripted = iter([("weak", 0.3), ("strong", 0.7), ("worse", 0.4)])
+
+    def fake(agent, system, user, creds=None):
+        if agent == "writer":
+            fake.current = next(scripted)
+            return {"bullets": [fake.current[0]], "cover_letter": fake.current[0]}
+        if agent == "critic":
+            return {"score": fake.current[1], "notes": ["n"]}
+        return {"requirements": [], "gaps": [], "questions": []}
+
+    monkeypatch.setattr(graph, "complete", fake)
+    done = list(graph.run(POSTING, CV))[-1]
+    assert done["result"]["draft"]["bullets"] == ["strong"]
+    assert done["result"]["critique"]["score"] == 0.7
+    assert done["result"]["approved"] is False

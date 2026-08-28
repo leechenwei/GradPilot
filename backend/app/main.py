@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import uuid
 from collections.abc import Iterator
 from typing import Annotated
@@ -64,7 +65,7 @@ def model_ready() -> bool:
     return provider() != "mock" or _mock_allowed()
 
 
-def _creds(header_provider: str, header_key: str) -> Creds | None:
+def _creds(header_provider: str, header_key: str, header_model: str = "") -> Creds | None:
     """A key the user pasted. Validated, used for this request, never stored or logged."""
     key = header_key.strip()
     if not key:
@@ -76,7 +77,10 @@ def _creds(header_provider: str, header_key: str) -> Creds | None:
         )
     if not 20 <= len(key) <= 200:
         raise HTTPException(status_code=400, detail="That does not look like an API key.")
-    return Creds(provider=name, key=key)
+    model = header_model.strip()[:100]
+    if model and not re.fullmatch(r"[\w./:-]+", model):
+        raise HTTPException(status_code=400, detail="That model name has odd characters.")
+    return Creds(provider=name, key=key, model=model)
 
 
 @app.post("/api/checkout")
@@ -154,11 +158,12 @@ def start_run(
     x_session_id: str = Header(default="anonymous"),
     x_llm_provider: str = Header(default=""),
     x_llm_key: str = Header(default=""),
+    x_llm_model: str = Header(default=""),
 ) -> StreamingResponse:
     # ponytail: the socket peer, not X-Forwarded-For — that header is client-set.
     # Behind a proxy, read it from the platform's trusted variant instead.
     ip = request.client.host if request.client else "unknown"
-    creds = _creds(x_llm_provider, x_llm_key)
+    creds = _creds(x_llm_provider, x_llm_key, x_llm_model)
     if not creds and not model_ready():
         # Canned text dressed up as a tailored application would be worse than nothing:
         # someone could send it to a real employer. Refuse instead.

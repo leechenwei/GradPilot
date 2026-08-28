@@ -121,3 +121,51 @@ def test_a_users_own_key_still_runs_when_the_server_has_no_model(monkeypatch):
     headers = {**session(), "X-LLM-Provider": "openai", "X-LLM-Key": "sk-" + "x" * 40}
     # The call itself fails on a fake key, but it is a real attempt, not canned text.
     assert client.post("/api/run", json=BODY, headers=headers).status_code == 200
+
+
+def test_openrouter_is_an_accepted_provider_with_a_model_override():
+    from app.main import _creds
+
+    creds = _creds("openrouter", "sk-or-v1-" + "b" * 40, "minimax/minimax-m3:free")
+    assert creds is not None
+    assert (creds.provider, creds.model) == ("openrouter", "minimax/minimax-m3:free")
+
+
+def test_a_model_name_with_odd_characters_is_refused():
+    from fastapi import HTTPException
+
+    from app.main import _creds
+
+    with pytest.raises(HTTPException):
+        _creds("openrouter", "sk-or-v1-" + "b" * 40, "model; rm -rf /")
+
+
+def test_json_wrapped_in_chatter_is_still_parsed():
+    """Free models often answer 'Sure! {...}'. Take the object, do not fail the run."""
+    from app.llm import _parse
+
+    assert _parse('Sure, here you go:\n{"score": 0.9, "notes": []}\nHope that helps!') == {
+        "score": 0.9,
+        "notes": [],
+    }
+
+
+def test_a_provider_error_object_is_reported_not_crashed():
+    """A missing 'choices' used to raise KeyError, which reads as our bug, not theirs."""
+    from app.llm import LLMError, _dig
+
+    with pytest.raises(LLMError, match="unexpected reply"):
+        _dig({"error": {"message": "rate limited"}}, "choices", 0, "message", "content")
+
+
+def test_an_empty_completion_is_an_error_not_empty_output():
+    from app.llm import LLMError, _dig
+
+    with pytest.raises(LLMError, match="no text"):
+        _dig({"choices": [{"message": {"content": "   "}}]}, "choices", 0, "message", "content")
+
+
+def test_json_wrapped_in_a_one_item_array_is_unwrapped():
+    from app.llm import _parse
+
+    assert _parse('[{"score": 0.8, "notes": []}]') == {"score": 0.8, "notes": []}

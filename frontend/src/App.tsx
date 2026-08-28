@@ -144,9 +144,9 @@ export function App() {
             {needsKey && (
               <p className="banner" role="status">
                 <AlertIcon />
-                This server has no model configured, so it will not write anything for you.
-                Add your own API key below — GradPilot never invents an application from
-                canned text.
+                This demo runs on your own API key. Paste one below and the agents write with
+                the model you choose, billed to you — about US$0.01 a run. Nothing is generated
+                without a key: an application built from canned text is worse than none.
               </p>
             )}
 
@@ -239,13 +239,29 @@ function KeyBox({ onChange, open }: { onChange: () => void; open?: boolean }) {
   const saved = readKey();
   const [provider, setProvider] = useState(saved.provider);
   const [key, setKey] = useState(saved.key);
+  const [model, setModel] = useState(saved.model);
 
   return (
     <details className="tip keybox" open={open}>
       <summary>{saved.key ? "Using your own API key" : "Use your own API key (unlimited runs)"}</summary>
       <p className="help">
-        Paste a key and every run goes to your account instead of the free pool. It is kept
-        in this browser, sent with each request, and never written down on the server.
+        Paste a key and every run is billed to your own account. The key stays in this
+        browser, rides along with each request, and is never written down on the server.
+        A full run is about five model calls — roughly US$0.01 on a small model.
+      </p>
+      <p className="help">
+        Get a key:{" "}
+        <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">OpenAI</a>
+        {" · "}
+        <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">
+          Anthropic
+        </a>
+        {" · "}
+        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">Gemini</a>
+        {" · "}
+        <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">
+          OpenRouter (has free models)
+        </a>
       </p>
       <div className="tool-row">
         <select
@@ -253,31 +269,32 @@ function KeyBox({ onChange, open }: { onChange: () => void; open?: boolean }) {
           value={provider}
           onChange={(e) => {
             setProvider(e.target.value);
-            saveKey(e.target.value, key);
+            saveKey(e.target.value, key, model);
             onChange();
           }}
         >
           <option value="openai">OpenAI</option>
           <option value="anthropic">Anthropic</option>
           <option value="gemini">Gemini</option>
+          <option value="openrouter">OpenRouter (free models)</option>
         </select>
         <input
           type="password"
           aria-label="API key"
           placeholder="sk-…"
           value={key}
-          onChange={(e) => setKey(e.target.value)}
-          onBlur={() => {
-            saveKey(provider, key.trim());
-            onChange();
+          onChange={(e) => {
+            setKey(e.target.value);
+            saveKey(provider, e.target.value.trim(), model.trim());
           }}
+          onBlur={onChange}
         />
         {key && (
           <button
             className="ghost tiny"
             onClick={() => {
               setKey("");
-              saveKey(provider, "");
+              saveKey(provider, "", model);
               onChange();
             }}
           >
@@ -285,6 +302,26 @@ function KeyBox({ onChange, open }: { onChange: () => void; open?: boolean }) {
           </button>
         )}
       </div>
+      {provider === "openrouter" && (
+        <div className="tool-row">
+          <input
+            aria-label="Model id"
+            placeholder="nvidia/nemotron-3-super-120b-a12b:free"
+            value={model}
+            onChange={(e) => {
+              setModel(e.target.value);
+              saveKey(provider, key.trim(), e.target.value.trim());
+            }}
+          />
+          <span className="help">
+            Free ids rotate — copy one from{" "}
+            <a href="https://openrouter.ai/models?max_price=0" target="_blank" rel="noreferrer">
+              openrouter.ai/models
+            </a>
+            . Blank uses the default.
+          </span>
+        </div>
+      )}
     </details>
   );
 }

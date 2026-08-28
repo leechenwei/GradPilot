@@ -28,24 +28,30 @@ export type Wallet = {
 };
 
 /** The key lives in this browser only. It is sent per request and never persisted server-side. */
-export function readKey(): { provider: string; key: string } {
+export function readKey(): { provider: string; key: string; model: string } {
   return {
     provider: localStorage.getItem("gradpilot.provider") ?? "openai",
     key: localStorage.getItem("gradpilot.key") ?? "",
+    model: localStorage.getItem("gradpilot.model") ?? "",
   };
 }
 
-export function saveKey(provider: string, key: string): void {
+export function saveKey(provider: string, key: string, model = ""): void {
   localStorage.setItem("gradpilot.provider", provider);
+  localStorage.setItem("gradpilot.model", model);
   if (key) localStorage.setItem("gradpilot.key", key);
   else localStorage.removeItem("gradpilot.key");
 }
 
 function headers(): Record<string, string> {
-  const { provider, key } = readKey();
-  return key
-    ? { "X-Session-Id": sessionId(), "X-LLM-Provider": provider, "X-LLM-Key": key }
-    : { "X-Session-Id": sessionId() };
+  const { provider, key, model } = readKey();
+  if (!key) return { "X-Session-Id": sessionId() };
+  return {
+    "X-Session-Id": sessionId(),
+    "X-LLM-Provider": provider,
+    "X-LLM-Key": key,
+    ...(model ? { "X-LLM-Model": model } : {}),
+  };
 }
 
 export async function wallet(): Promise<Wallet> {

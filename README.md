@@ -65,6 +65,20 @@ back the test suite and local UI work, behind an explicit opt-in:
 export GRADPILOT_ALLOW_MOCK=1   # tests and local UI work only
 ```
 
+OpenRouter works too, and has free models. Measured on a full run of this graph
+(9 calls including the revision loop), August 2026:
+
+| Free model | Result |
+| --- | --- |
+| `nvidia/nemotron-3-super-120b-a12b:free` | works, ~130 s, best structure — the default |
+| `minimax/minimax-m3:free` | works, ~107 s, wordier letters |
+| `minimax/minimax-m2.7:free` | works, but ~272 s |
+| `z-ai/glm-5.2:free`, `google/gemma-4-*:free` | 429 — busy most of the time |
+| `thinkingmachines/inkling:free` | 403 — agentic harnesses only |
+
+Free ids rotate and the endpoints are heavily shared, so treat any of them as
+best-effort and let users name their own model in the UI.
+
 Set one of the following to use a real model:
 
 ```bash

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any, NamedTuple
 
 import httpx
 
 TIMEOUT = 60.0
-PROVIDERS = ("openai", "anthropic", "gemini")
+RETRY_STATUSES = (429, 502, 503, 529)  # free tiers bounce constantly; one retry is worth it
+PROVIDERS = ("openai", "anthropic", "gemini", "openrouter")
 
 
 class Creds(NamedTuple):
@@ -17,6 +19,7 @@ class Creds(NamedTuple):
 
     provider: str
     key: str
+    model: str = ""  # OpenRouter's free model ids come and go, so let the user name one
 
 
 class LLMError(RuntimeError):
@@ -39,10 +42,14 @@ _DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",
     "anthropic": "claude-sonnet-5",
     "gemini": "gemini-2.0-flash",
+    # Free ids rotate; override with GRADPILOT_LLM_MODEL or the model box in the UI.
+    "openrouter": "nvidia/nemotron-3-super-120b-a12b:free",
 }
 
 
-def _model(name: str) -> str:
+def _model(name: str, creds: Creds | None = None) -> str:
+    if creds and creds.model:
+        return creds.model
     return os.getenv("GRADPILOT_LLM_MODEL") or _DEFAULT_MODELS.get(name, "")
 
 
@@ -64,7 +71,16 @@ def _parse(raw: str) -> dict[str, Any]:
     try:
         value = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise LLMError(f"model did not return JSON: {raw[:200]}") from exc
+        # Smaller models like to wrap JSON in a sentence. Take the outermost object.
+        start, end = raw.find("{"), raw.rfind("}")
+        if start == -1 or end <= start:
+            raise LLMError(f"model did not return JSON: {raw[:200]}") from exc
+        try:
+            value = json.loads(raw[start : end + 1])
+        except json.JSONDecodeError:
+            raise LLMError(f"model did not return JSON: {raw[:200]}") from exc
+    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], dict):
+        value = value[0]  # some models wrap the object in a one-item array
     if not isinstance(value, dict):
         raise LLMError("model returned JSON but not an object")
     return value
@@ -72,31 +88,53 @@ def _parse(raw: str) -> dict[str, Any]:
 
 def _call(name: str, system: str, user: str, creds: Creds | None) -> str:
     if name == "openai":
-        return _post(
+        body = _post(
             "https://api.openai.com/v1/chat/completions",
             {"Authorization": f"Bearer {_key(creds, 'OPENAI_API_KEY')}"},
             {
-                "model": _model(name),
+                "model": _model(name, creds),
                 "response_format": {"type": "json_object"},
-                "messages": [{"role": "system", "content": system},
-                             {"role": "user", "content": user}],
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
             },
-        )["choices"][0]["message"]["content"]
+        )
+        return _dig(body, "choices", 0, "message", "content")
+    if name == "openrouter":
+        # OpenAI-shaped, but no response_format: several free models reject it outright.
+        body = _post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            {
+                "Authorization": f"Bearer {_key(creds, 'OPENROUTER_API_KEY')}",
+                "HTTP-Referer": "https://github.com/leechenwei/GradPilot",
+                "X-Title": "GradPilot",
+            },
+            {
+                "model": _model(name, creds),
+                "messages": [
+                    {"role": "system", "content": system + " Reply with JSON only."},
+                    {"role": "user", "content": user},
+                ],
+            },
+        )
+        return _dig(body, "choices", 0, "message", "content")
     if name == "anthropic":
-        return _post(
+        body = _post(
             "https://api.anthropic.com/v1/messages",
             {"x-api-key": _key(creds, "ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01"},
             {
-                "model": _model(name),
+                "model": _model(name, creds),
                 "max_tokens": 2048,
                 "system": system,
                 "messages": [{"role": "user", "content": user}],
             },
-        )["content"][0]["text"]
+        )
+        return _dig(body, "content", 0, "text")
     if name == "gemini":
         key = _key(creds, "GEMINI_API_KEY")
-        return _post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{_model(name)}"
+        body = _post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{_model(name, creds)}"
             f":generateContent?key={key}",
             {},
             {
@@ -104,8 +142,27 @@ def _call(name: str, system: str, user: str, creds: Creds | None) -> str:
                 "contents": [{"parts": [{"text": user}]}],
                 "generationConfig": {"responseMimeType": "application/json"},
             },
-        )["candidates"][0]["content"]["parts"][0]["text"]
+        )
+        return _dig(body, "candidates", 0, "content", "parts", 0, "text")
     raise LLMError(f"unknown provider: {name}")
+
+
+def _dig(body: Any, *path: str | int) -> str:
+    """Walk the provider's reply shape, or say what came back instead.
+
+    A raw KeyError here reads as a bug in GradPilot. It is almost always the
+    provider answering with an error object, a moderation block, or an empty
+    choices list, and the user needs to see which.
+    """
+    node = body
+    for step in path:
+        try:
+            node = node[step]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise LLMError(f"unexpected reply from the model: {str(body)[:300]}") from exc
+    if not isinstance(node, str) or not node.strip():
+        raise LLMError(f"the model returned no text: {str(body)[:300]}")
+    return node
 
 
 def _key(creds: Creds | None, env: str) -> str:
@@ -119,7 +176,15 @@ def _key(creds: Creds | None, env: str) -> str:
 
 
 def _post(url: str, headers: dict[str, str], body: dict[str, Any]) -> Any:
-    response = httpx.post(url, headers=headers, json=body, timeout=TIMEOUT)
+    for attempt in (0, 1):
+        response = httpx.post(url, headers=headers, json=body, timeout=TIMEOUT)
+        if response.status_code in RETRY_STATUSES and attempt == 0:
+            time.sleep(2)  # free models bounce under load; one retry saves most runs
+            continue
+        break
     if response.status_code >= 400:
         raise LLMError(f"{response.status_code}: {response.text[:300]}")
-    return response.json()
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise LLMError(f"the provider returned a non-JSON body: {response.text[:200]}") from exc

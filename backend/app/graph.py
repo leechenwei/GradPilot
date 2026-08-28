@@ -46,6 +46,9 @@ def run(posting: str, cv: str, creds: Creds | None = None) -> Iterator[dict[str,
 
     draft: dict[str, Any] = {}
     critique: dict[str, Any] = {}
+    # Revisions do not always improve: real critics scored pass 3 below pass 2 in
+    # testing. Keep the best draft seen, not the last one written.
+    best: tuple[float, dict[str, Any], dict[str, Any]] = (-1.0, {}, {})
     feedback = ""
     for attempt in range(MAX_REVISIONS + 1):
         yield from _step(
@@ -64,12 +67,16 @@ def run(posting: str, cv: str, creds: Creds | None = None) -> Iterator[dict[str,
             revision=attempt,
             creds=creds,
         )
-        if float(critique.get("score", 0)) >= APPROVAL_THRESHOLD:
+        score = _score(critique)
+        if score > best[0]:
+            best = (score, dict(draft), dict(critique))
+        if score >= APPROVAL_THRESHOLD:
             break
         feedback = "\n\nCRITIC FEEDBACK (fix every point):\n" + "\n".join(
             f"- {n}" for n in critique.get("notes", [])
         )
 
+    score, draft, critique = best
     interviewer: dict[str, Any] = {}
     yield from _step(
         interviewer,
@@ -87,7 +94,8 @@ def run(posting: str, cv: str, creds: Creds | None = None) -> Iterator[dict[str,
             "draft": draft,
             "critique": critique,
             "interviewer": interviewer,
-            "approved": float(critique.get("score", 0)) >= APPROVAL_THRESHOLD,
+            "approved": score >= APPROVAL_THRESHOLD,
+            "passes": attempt + 1,
         },
     }
 
@@ -104,6 +112,20 @@ def _step(
     out.clear()
     out.update(complete(agent, system, user, creds))
     yield {"type": "result", "agent": agent, "revision": revision, "data": dict(out)}
+
+
+def _score(critique: dict[str, Any]) -> float:
+    """Models write 0.72, "0.72", 72 and "72%". Land them all on 0-1, junk on 0."""
+    raw = critique.get("score", 0)
+    if isinstance(raw, str):
+        raw = raw.strip().rstrip("%")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    if value > 1:
+        value = value / 100
+    return max(0.0, min(1.0, value))
 
 
 def _dump(value: Any) -> str:
