@@ -17,6 +17,7 @@ BODY = {
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
     monkeypatch.setenv("GRADPILOT_LLM_PROVIDER", "mock")
+    monkeypatch.setenv("GRADPILOT_ALLOW_MOCK", "1")
     quota.reset()
     monkeypatch.setattr(credits, "store", credits.MemoryStore())
 
@@ -103,3 +104,20 @@ def test_underpayment_is_rejected_by_the_verifier(monkeypatch):
     )
     with pytest.raises(payments.PaymentError, match="short"):
         payments.verify("abc123")
+
+
+def test_without_a_model_the_run_is_refused_rather_than_faked(monkeypatch):
+    """Mock text must never reach a user who thinks it was written for them."""
+    monkeypatch.delenv("GRADPILOT_ALLOW_MOCK", raising=False)
+    client = TestClient(app)
+    response = client.post("/api/run", json=BODY, headers=session())
+    assert response.status_code == 412
+    assert "api key" in response.json()["detail"].lower()
+
+
+def test_a_users_own_key_still_runs_when_the_server_has_no_model(monkeypatch):
+    monkeypatch.delenv("GRADPILOT_ALLOW_MOCK", raising=False)
+    client = TestClient(app)
+    headers = {**session(), "X-LLM-Provider": "openai", "X-LLM-Key": "sk-" + "x" * 40}
+    # The call itself fails on a fake key, but it is a real attempt, not canned text.
+    assert client.post("/api/run", json=BODY, headers=headers).status_code == 200

@@ -56,10 +56,16 @@ login, so those fail fast and point at the bookmarklet instead: it reads the ad
 in the user's own logged-in tab and hands the text over in the URL fragment,
 which never reaches a server.
 
-With no API key set the backend runs in **mock mode**: the full agent graph
-executes with deterministic canned model responses, so the UI, streaming and
-revision loop are fully demoable offline. Set one of the following to use a real
-model:
+**A run needs a real model.** With no key configured and none supplied by the
+user, `/api/run` answers `412` and the UI disables the button — canned text must
+never leave the building dressed as someone's job application. Mock replies still
+back the test suite and local UI work, behind an explicit opt-in:
+
+```bash
+export GRADPILOT_ALLOW_MOCK=1   # tests and local UI work only
+```
+
+Set one of the following to use a real model:
 
 ```bash
 export GRADPILOT_LLM_PROVIDER=openai   # openai | anthropic | gemini | mock

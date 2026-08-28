@@ -23,6 +23,7 @@ CV = (
 @pytest.fixture(autouse=True)
 def _mock_mode(monkeypatch):
     monkeypatch.setenv("GRADPILOT_LLM_PROVIDER", "mock")
+    monkeypatch.setenv("GRADPILOT_ALLOW_MOCK", "1")
     quota.reset()
 
 

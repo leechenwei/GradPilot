@@ -51,7 +51,10 @@ export function App() {
     }
   }, []);
 
-  const ready = posting.trim().length >= MIN_CHARS && cv.trim().length >= MIN_CHARS;
+  // No model and no key means nothing can be written. Say so before the click, not after.
+  const needsKey = money !== null && !money.model_ready && !readKey().key;
+  const ready =
+    posting.trim().length >= MIN_CHARS && cv.trim().length >= MIN_CHARS && !needsKey;
 
   async function go() {
     setRunning(true);
@@ -128,7 +131,7 @@ export function App() {
               >
                 Fill a sample
               </button>
-              {!ready && !running && (
+              {!ready && !running && !needsKey && (
                 <span className="help">Both boxes need at least {MIN_CHARS} characters.</span>
               )}
               {money && <Wallet money={money} />}
@@ -138,7 +141,16 @@ export function App() {
               <p className="banner error" role="alert"><AlertIcon /> {error}</p>
             )}
 
-            <KeyBox onChange={refreshWallet} />
+            {needsKey && (
+              <p className="banner" role="status">
+                <AlertIcon />
+                This server has no model configured, so it will not write anything for you.
+                Add your own API key below — GradPilot never invents an application from
+                canned text.
+              </p>
+            )}
+
+            <KeyBox onChange={refreshWallet} open={needsKey} />
           </section>
 
           <section className="card" aria-labelledby="pipeline-heading">
@@ -223,13 +235,13 @@ function Wallet({ money }: { money: Wallet }) {
 }
 
 /** Bring your own key: the run is billed to the user, so the server pays nothing. */
-function KeyBox({ onChange }: { onChange: () => void }) {
+function KeyBox({ onChange, open }: { onChange: () => void; open?: boolean }) {
   const saved = readKey();
   const [provider, setProvider] = useState(saved.provider);
   const [key, setKey] = useState(saved.key);
 
   return (
-    <details className="tip keybox">
+    <details className="tip keybox" open={open}>
       <summary>{saved.key ? "Using your own API key" : "Use your own API key (unlimited runs)"}</summary>
       <p className="help">
         Paste a key and every run goes to your account instead of the free pool. It is kept

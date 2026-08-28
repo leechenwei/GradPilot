@@ -24,6 +24,7 @@ export type Wallet = {
   credits: number;
   package: { runs: number; price: string };
   can_buy: boolean;
+  model_ready: boolean;
 };
 
 /** The key lives in this browser only. It is sent per request and never persisted server-side. */

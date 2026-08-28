@@ -40,7 +40,7 @@ def root() -> dict[str, str]:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "provider": provider()}
+    return {"status": "ok", "provider": provider(), "model_ready": str(model_ready()).lower()}
 
 
 @app.get("/api/quota")
@@ -51,7 +51,17 @@ def get_quota(x_session_id: str = Header(default="anonymous")) -> dict[str, obje
         "credits": credits.store.balance(x_session_id),
         "package": {"runs": payments.PACKAGE_RUNS, "price": "RM10"},
         "can_buy": payments.configured() and credits.is_durable(),
+        "model_ready": model_ready(),
     }
+
+
+def _mock_allowed() -> bool:
+    """Mock replies exist for tests and local work, never for a user's real application."""
+    return os.getenv("GRADPILOT_ALLOW_MOCK") == "1"
+
+
+def model_ready() -> bool:
+    return provider() != "mock" or _mock_allowed()
 
 
 def _creds(header_provider: str, header_key: str) -> Creds | None:
@@ -149,6 +159,16 @@ def start_run(
     # Behind a proxy, read it from the platform's trusted variant instead.
     ip = request.client.host if request.client else "unknown"
     creds = _creds(x_llm_provider, x_llm_key)
+    if not creds and not model_ready():
+        # Canned text dressed up as a tailored application would be worse than nothing:
+        # someone could send it to a real employer. Refuse instead.
+        raise HTTPException(
+            status_code=412,
+            detail=(
+                "No model is configured on this server, so nothing can be written for you. "
+                "Add your own API key to run."
+            ),
+        )
     if creds:
         left = -1  # their key, their bill: the free cap does not apply
     else:
